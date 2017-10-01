@@ -13,6 +13,15 @@ var _playerY = 140;
 var _lastNote = 60;
 var _state;
 var _lastT = 0;
+var _numKeysPressed = 0;
+var _curNote = 60;
+var _bottomNote = 21;
+var _topNote = 108;
+var _pressedNotes = new Set();
+var _selectedKeyboard;
+
+// constants
+var NOTENAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 // game states
 const NEW = 0;
@@ -20,14 +29,18 @@ const GAME = 1;
 const OVER = 2;
 
 // variables that change how the game behaves
-const bottomNote = 21;
-const topNote = 108;
-const flyableSpace = 650;
+const flyableSpace = 350;
 const obstacleHeight = 15;
 const maxRateOfChange = 25;
 const playerSize = 15;
-const speed = 1.5;
+const speed = 3.5;
 
+
+function noteNumberToName(midiNumber) {
+    let noteNameInd = midiNumber % 12;
+    let octave = Math.floor(midiNumber/12);
+    return NOTENAMES[noteNameInd] + octave;
+}
 
 function init() {
     _canvas = document.getElementById("main")
@@ -36,7 +49,7 @@ function init() {
     _canvas.width = _width;
     _canvas.height = _height;
     _ctx = _canvas.getContext("2d")
-    _playerX = _width * (_lastNote-bottomNote)/(topNote-bottomNote);
+    _playerX = _width * (_lastNote-_bottomNote)/(_topNote-_bottomNote);
     _state = NEW;
     reset();
 
@@ -48,7 +61,7 @@ function reset() {
     _obsts = [];
     _lastNote = 60;
     _playerdX = 0;
-    _playerX = _width * (_lastNote-bottomNote)/(topNote-bottomNote);
+    _playerX = _width * (_lastNote-_bottomNote)/(_topNote-_bottomNote);
     _projectedPos = _playerX;
 }
 
@@ -64,21 +77,41 @@ function onMIDIMessage(e) {
     let data = e.data;
     let type = data[0] & 0xf0;
     let note = data[1];
-    if(type == 144) {
-        if(_state == NEW && note == 60) {
-            reset();
-            _state = GAME;
-        } else if(_state == GAME) {
-            if(note == _lastNote+1) {
-                _lastNote = note;
-            } else if(note == _lastNote-1) {
-                _lastNote = note;
+    let target = e.target;
+
+    if(type == 144) { // note down
+        _numKeysPressed++;
+        _pressedNotes.add(note);
+        if(_state == NEW) {
+            if(_numKeysPressed == 2) {
+                _topNote = Math.max(..._pressedNotes);
+                _bottomNote = Math.min(..._pressedNotes);
+                _selectedKeyboard = target;
+                console.log("calibrated", _topNote, _bottomNote);
+            } else if(note == 60 && target == _selectedKeyboard) {
+                reset();
+                _state = GAME;
             }
-            _projectedPos = _width * (_lastNote-bottomNote)/(topNote-bottomNote)
+            
+        } else if(_state == GAME) {
+            if(target == _selectedKeyboard) {
+                if(note == _lastNote+1) {
+                    _lastNote = note;
+                    _curNote = note;
+                } else if(note == _lastNote-1) {
+                    _lastNote = note;
+                    _curNote = note;
+                }
+            }
+           
+            _projectedPos = _width * (_lastNote-_bottomNote)/(_topNote-_bottomNote)
         } else if(_state == OVER && note == 60) {
             reset();
             _state = NEW;
         }
+    } else if (type == 128) { // note up
+        _numKeysPressed--;
+        _pressedNotes.delete(note);
     }
 }
 
@@ -140,9 +173,11 @@ function isCollide() {
 }
 
 function drawPlayer() {
-    _ctx.rect(_playerX, _playerY, 15, 15);
-    _ctx.fillStyle = "#fff";
-    _ctx.fill();
+    if(_state != OVER) {
+        _ctx.rect(_playerX, _playerY, 15, 15);
+        _ctx.fillStyle = "#fff";
+        _ctx.fill();
+    }
 }
 
 function drawObstacles() {
@@ -172,10 +207,26 @@ function drawText() {
         _ctx.font = "30pt VT323";
         _ctx.fillText("Move left and right by moving up and down chromatic", leftMargin, 250);
         _ctx.fillText("scales. Start by pressing middle C.", leftMargin, 285);
+        _ctx.fillText("Press the highest and lowest keys on your keyboard to", leftMargin, 335);
+        _ctx.fillText("calibrate the game for your keyboard.", leftMargin, 370);
+        if(_selectedKeyboard) {
+            _ctx.fillText("Current keyboard: ", leftMargin, 420);
+            _ctx.fillText(_selectedKeyboard.name, leftMargin+50, 455);
+            _ctx.fillText((_topNote-_bottomNote+1)+" keys, "
+                +noteNumberToName(_bottomNote)+"-"+noteNumberToName(_topNote), leftMargin+50, 490);
+        } else {
+            _ctx.fillText("No keyboard selected", leftMargin, 420);
+        }
+        break;
+    case GAME:
+        _ctx.font = "30pt VT323";
+        _ctx.fillText(noteNumberToName(_curNote), leftMargin, leftMargin);
         break;
     case OVER:
         _ctx.font = "90pt VT323";
-        _ctx.fillText("Game over", leftMargin, 100);
+        _ctx.fillText("Game over!", leftMargin, 100);
+        _ctx.font = "30pt VT323";
+        _ctx.fillText("Press middle C to restart.", leftMargin+10, 135);
         break;
     }
     _ctx.globalCompositeOperation = 'normal';
